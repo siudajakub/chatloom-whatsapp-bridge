@@ -94,9 +94,17 @@ func (wa *WhatsAppClient) handleWAEvent(rawEvt any) (success bool) {
 		success = wa.handleWAUndecryptableMessage(ctx, evt)
 
 	case *events.CallOffer:
-		success = wa.handleWACallStart(ctx, evt.GroupJID, evt.CallCreator, evt.CallCreatorAlt, evt.CallID, "", evt.Timestamp)
+		var media string
+		if evt.Data != nil {
+			if _, ok := evt.Data.GetOptionalChildByTag("video"); ok {
+				media = "video"
+			} else if _, ok := evt.Data.GetOptionalChildByTag("audio"); ok {
+				media = "audio"
+			}
+		}
+		success = wa.handleWACallStart(ctx, evt.GroupJID, evt.CallCreator, evt.CallCreatorAlt, evt.CallID, media, evt.Timestamp)
 	case *events.CallOfferNotice:
-		success = wa.handleWACallStart(ctx, evt.GroupJID, evt.CallCreator, evt.CallCreatorAlt, evt.CallID, evt.Type, evt.Timestamp)
+		success = wa.handleWACallStart(ctx, evt.GroupJID, evt.CallCreator, evt.CallCreatorAlt, evt.CallID, evt.Media, evt.Timestamp)
 	case *events.CallTerminate, *events.CallRelayLatency, *events.CallAccept, *events.UnknownCallEvent:
 		// ignore
 	case *events.IdentityChange:
@@ -643,8 +651,18 @@ func (wa *WhatsAppClient) handleWACallStart(ctx context.Context, group, sender, 
 
 func convertCallStart(ctx context.Context, portal *bridgev2.Portal, intent bridgev2.MatrixAPI, callType string) (*bridgev2.ConvertedMessage, error) {
 	text := "Incoming call. Use the WhatsApp app to answer."
-	if callType != "" {
+	fields := map[string]any{"status": "incoming", "direction": "incoming"}
+	switch callType {
+	case "audio", "video":
 		text = fmt.Sprintf("Incoming %s call. Use the WhatsApp app to answer.", callType)
+	default:
+		callType = ""
+	}
+	if callType == "audio" {
+		callType = "voice"
+	}
+	if callType != "" {
+		fields["call_type"] = callType
 	}
 	return &bridgev2.ConvertedMessage{
 		Parts: []*bridgev2.ConvertedMessagePart{{
@@ -657,6 +675,7 @@ func convertCallStart(ctx context.Context, portal *bridgev2.Portal, intent bridg
 					CallType: event.BeeperActionMessageCallType(callType),
 				},
 			},
+			Extra: map[string]any{"com.chatloom.call": fields},
 		}},
 	}, nil
 }

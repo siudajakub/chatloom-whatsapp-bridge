@@ -54,6 +54,8 @@ func getMessageType(waMsg *waE2E.Message) string {
 		return "group mention"
 	case waMsg.ScheduledCallCreationMessage != nil:
 		return "scheduled call create"
+	case waMsg.CallLogMesssage != nil:
+		return "call log"
 	case waMsg.ScheduledCallEditMessage != nil:
 		return "scheduled call edit"
 	case waMsg.ReactionMessage != nil:

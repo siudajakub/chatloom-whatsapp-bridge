@@ -186,6 +186,9 @@ func (mc *MessageConverter) ToMatrix(
 		part, contextInfo = mc.convertPollUpdateMessage(ctx, info, waMsg.PollUpdateMessage)
 	case waMsg.EventMessage != nil:
 		part, contextInfo = mc.convertEventMessage(ctx, waMsg.EventMessage)
+	case waMsg.CallLogMesssage != nil:
+		part = convertCallLogMessage(waMsg.CallLogMesssage)
+		part.DontBridge = portal.Disappear.Timer > 0 || rawWaMsg.GetEphemeralMessage() != nil || isViewOnce
 	case waMsg.PinInChatMessage != nil:
 		part, contextInfo = mc.convertPinInChatMessage(ctx, waMsg.PinInChatMessage)
 	case waMsg.KeepInChatMessage != nil:
