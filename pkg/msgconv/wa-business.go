@@ -48,25 +48,24 @@ func (mc *MessageConverter) convertTemplateMessage(ctx context.Context, info *ty
 		}, tplMsg.GetContextInfo()
 	}
 	content := tpl.GetHydratedContentText()
+	var actions []businessURLAction
+	var unsupported []string
 	if buttons := tpl.GetHydratedButtons(); len(buttons) > 0 {
-		addButtonText := false
-		descriptions := make([]string, len(buttons))
-		for i, rawButton := range buttons {
+		for _, rawButton := range buttons {
 			switch button := rawButton.GetHydratedButton().(type) {
 			case *waE2E.HydratedTemplateButton_QuickReplyButton:
-				descriptions[i] = fmt.Sprintf("<%s>", button.QuickReplyButton.GetDisplayText())
-				addButtonText = true
+				unsupported = append(unsupported, businessButtonDescription(button.QuickReplyButton.GetDisplayText()))
 			case *waE2E.HydratedTemplateButton_UrlButton:
-				descriptions[i] = fmt.Sprintf("[%s](%s)", button.UrlButton.GetDisplayText(), button.UrlButton.GetURL())
+				if !addBusinessURLAction(&actions, button.UrlButton.GetDisplayText(), button.UrlButton.GetURL()) {
+					unsupported = append(unsupported, businessButtonDescription(button.UrlButton.GetDisplayText()))
+				}
 			case *waE2E.HydratedTemplateButton_CallButton:
-				descriptions[i] = fmt.Sprintf("[%s](tel:%s)", button.CallButton.GetDisplayText(), button.CallButton.GetPhoneNumber())
+				// Keep the upstream phone-link fallback; v1 only advertises HTTP(S) actions.
+				content = strings.TrimSpace(fmt.Sprintf("%s\n\n[%s](tel:%s)", content, button.CallButton.GetDisplayText(), button.CallButton.GetPhoneNumber()))
+			default:
+				unsupported = append(unsupported, businessButtonDescription("Unsupported button"))
 			}
 		}
-		description := strings.Join(descriptions, " - ")
-		if addButtonText {
-			description += "\nUse the WhatsApp app to click buttons"
-		}
-		content = strings.TrimSpace(fmt.Sprintf("%s\n\n%s", content, description))
 	}
 	if footer := tpl.GetHydratedFooterText(); footer != "" {
 		content = strings.TrimSpace(fmt.Sprintf("%s\n\n%s", content, footer))
@@ -86,9 +85,10 @@ func (mc *MessageConverter) convertTemplateMessage(ctx context.Context, info *ty
 		content = fmt.Sprintf("%s\n\n%s", title.HydratedTitleText, content)
 	}
 
-	converted := mc.postProcessBusinessMessage(content, convertedTitle)
-	converted.Extra["fi.mau.whatsapp.hydrated_template_id"] = tpl.GetTemplateID()
-	converted.Extra["fi.mau.whatsapp.business_message_type"] = "template"
+	converted := mc.postProcessBusinessActions(content, convertedTitle, actions, unsupported, map[string]any{
+		"fi.mau.whatsapp.hydrated_template_id":  tpl.GetTemplateID(),
+		"fi.mau.whatsapp.business_message_type": "template",
+	})
 	return converted, tplMsg.GetContextInfo()
 }
 
@@ -110,18 +110,18 @@ func (mc *MessageConverter) convertTemplateButtonReplyMessage(ctx context.Contex
 
 func (mc *MessageConverter) convertInteractiveMessage(ctx context.Context, info *types.MessageInfo, msg *waE2E.InteractiveMessage) (*bridgev2.ConvertedMessagePart, *waE2E.ContextInfo) {
 	content := msg.GetBody().GetText()
+	var actions []businessURLAction
+	var unsupported []string
 	switch interactive := msg.GetInteractiveMessage().(type) {
 	case *waE2E.InteractiveMessage_ShopStorefrontMessage:
 		content = fmt.Sprintf("%s\n\nUnsupported shop storefront message", content)
 	case *waE2E.InteractiveMessage_CollectionMessage_:
 		// There doesn't seem to be much content here, maybe it's just meant to show the body/header/footer?
 	case *waE2E.InteractiveMessage_NativeFlowMessage_:
-		if buttons := interactive.NativeFlowMessage.GetButtons(); len(buttons) > 0 {
-			descriptions := make([]string, len(buttons))
-			for i, button := range buttons {
-				descriptions[i] = fmt.Sprintf("<%s>", button.GetName())
+		for _, button := range interactive.NativeFlowMessage.GetButtons() {
+			if !addNativeFlowURLAction(&actions, button) {
+				unsupported = append(unsupported, businessButtonDescription(button.GetName()))
 			}
-			content = fmt.Sprintf("%s\n\n%s\nUse the WhatsApp app to click buttons", content, strings.Join(descriptions, " - "))
 		}
 	case *waE2E.InteractiveMessage_CarouselMessage_:
 		content = fmt.Sprintf("%s\n\nUnsupported carousel message", content)
@@ -152,8 +152,9 @@ func (mc *MessageConverter) convertInteractiveMessage(ctx context.Context, info 
 		content = fmt.Sprintf("Unsupported thumbnail message\n\n%s", content)
 	}
 
-	converted := mc.postProcessBusinessMessage(content, convertedTitle)
-	converted.Extra["fi.mau.whatsapp.business_message_type"] = "interactive"
+	converted := mc.postProcessBusinessActions(content, convertedTitle, actions, unsupported, map[string]any{
+		"fi.mau.whatsapp.business_message_type": "interactive",
+	})
 	return converted, msg.GetContextInfo()
 }
 
